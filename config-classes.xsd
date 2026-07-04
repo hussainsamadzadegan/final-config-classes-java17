@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema"
+targetNamespace="http://finalconfigclasses.com/cfg/xsd"
+xmlns="http://finalconfigclasses.com/cfg/xsd" elementFormDefault="qualified">
+
+  <xs:element name="config-classes">
+    <xs:complexType>
+      <xs:sequence>
+        <xs:element minOccurs="1" maxOccurs="unbounded" ref="config-class"/>
+      </xs:sequence>
+    </xs:complexType>
+  </xs:element>
+   
+   <xs:element name="config-class">
+    <xs:complexType>
+      <xs:sequence>
+        <xs:element minOccurs="0" maxOccurs="unbounded" ref="attribute"/>
+        <xs:element minOccurs="0" maxOccurs="unbounded" ref="property"/>        
+      </xs:sequence>
+      <xs:attribute name="name" use="required" type="xs:anyURI"/>
+      <xs:attribute name="package" use="required" type="xs:anyURI"/>
+      <xs:attribute name="key" use="required" type="xs:anyURI"/>      
+      <xs:attribute name="extends" use="optional" default="BaseConfigBean" type="xs:anyURI"/>      
+    </xs:complexType>
+  </xs:element>
+  
+   <xs:element name="attribute">
+    <xs:complexType>
+      <xs:attribute name="name" use="required" type="xs:anyURI"/>
+      <xs:attribute name="type" use="required" type="xs:anyURI"/>
+      <xs:attribute name="key" use="required" type="xs:anyURI"/>      
+      <xs:attribute name="isArray" use="optional" default="false" type="xs:anyURI"/>
+    </xs:complexType>
+  </xs:element>
+  
+   <xs:element name="property">
+    <xs:complexType>
+      <xs:attribute name="name" use="required" type="xs:anyURI"/>
+      <xs:attribute name="type" use="required" type="xs:anyURI"/>
+      <xs:attribute name="isArray" use="optional" default="false" type="xs:anyURI"/>      
+    </xs:complexType>
+  </xs:element>
+    
+</xs:schema>

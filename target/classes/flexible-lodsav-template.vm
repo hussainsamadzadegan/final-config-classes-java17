@@ -1,0 +1,93 @@
+	public void load() throws ConfigException {
+		#foreach( $attr in $loadSaveAttrList )
+		#if( $attr.isArray == "true" )
+		${attr.type}[] oldVal_${foreach.index} = null, newVal_${foreach.index} = null;
+		#else
+		${Utils.wrapper($attr.type)} oldVal_${foreach.index} = null, newVal_${foreach.index} = null;
+		#end
+		#end
+
+		#foreach( $attr in $loadSaveAttrList )
+		boolean notify_${foreach.index} = false;
+		#end
+
+		writeLock();
+		try {
+		try {
+			// "flexible" mode: create the znode (and any missing parents) if it
+			// does not exist yet, rather than failing.
+			ZkAttrSnapshot snap = ZkConfigStore.loadAttributes(
+					ZkConfigManager.getInstance().getClient(),
+					_getPropertiesFile(), _getDocument(), _getXPath(), true);
+
+			if(snap.isLoaded()) {
+			#foreach( $attr in $loadSaveAttrList )
+			#set( $i = $foreach.index )
+			#if( $attr.isArray == "true" )
+			${attr.type}[] defVal_${i} = (${attr.type}[]) getDefValue("$attr.name");
+			boolean isSet_${i} = snap.isSet("$attr.name");
+			newVal_${i} = isSet_${i} ? (${attr.type}[]) snap.getValue("$attr.name") : defVal_${i};
+			oldVal_${i} = (${attr.type}[]) getAttr("$attr.name");
+		    setAttr("$attr.name", newVal_${i});
+		    _loadMarkSet("$attr.name", isSet_${i});
+		    notify_${i} = true;
+			#else			
+			${Utils.wrapper($attr.type)} defVal_${i} = (${Utils.wrapper($attr.type)}) getDefValue("$attr.name");
+			boolean isSet_${i} = snap.isSet("$attr.name");
+			newVal_${i} = isSet_${i} ? (${Utils.wrapper($attr.type)}) snap.getValue("$attr.name") : defVal_${i};
+			oldVal_${i} = (${Utils.wrapper($attr.type)}) getAttr("$attr.name");
+			setAttr("$attr.name", newVal_${i});
+	        _loadMarkSet("$attr.name", isSet_${i});
+	        notify_${i} = true;
+			#end
+			#end
+			}
+		} catch(ConfigException ce) {
+			throw ce;
+		} catch (Exception e) {			
+			throw new ConfigException(e);
+		}
+		} finally {
+			writeUnlock();
+		}
+		
+		//calling listeners out of lock block to avoid dead-lock.
+		#foreach( $attr in $loadSaveAttrList )
+		#set( $i = $foreach.index )
+		if(notify_${i})
+			firePropertyChange("$attr.name", oldVal_${i}, newVal_${i});		
+		#end
+	}
+	
+	public void save() throws ConfigException {
+		writeLock();
+		try {
+		try {
+			LinkedHashMap<String, Object> values = new LinkedHashMap<String, Object>();
+			LinkedHashMap<String, Boolean> setFlags = new LinkedHashMap<String, Boolean>();
+			
+			#foreach( $attr in $loadSaveAttrList )
+			#if( $attr.isArray == "true" )
+			${attr.type}[] arr_${foreach.index} = get${Utils.firstCharUp($attr.name)}();
+			values.put("$attr.name", arr_${foreach.index});
+			setFlags.put("$attr.name", _isSet("$attr.name"));
+			#else
+			values.put("$attr.name", get${Utils.firstCharUp($attr.name)}());
+			setFlags.put("$attr.name", _isSet("$attr.name"));
+			#end
+			#end
+
+			// "flexible" mode: create the znode (and any missing parents) if it
+			// does not exist yet, rather than failing.
+			ZkConfigStore.saveAttributes(
+					ZkConfigManager.getInstance().getClient(),
+					_getPropertiesFile(), _getDocument(), _getXPath(), values, setFlags, true);
+		} catch(ConfigException ce) {
+			throw ce;
+		} catch (Exception e) {
+			throw new ConfigException(e);
+		}
+		} finally {
+			writeUnlock();
+		}
+	}

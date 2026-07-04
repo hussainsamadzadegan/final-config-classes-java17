@@ -1,0 +1,163 @@
+#set ($isAttr = $Utils.isAttribute($obj))
+#set ($realType = $Utils.realType($obj))
+#set ($getterMethod = $Utils.getterMethod($obj))
+#set ($setterMethod = $Utils.setterMethod($obj))
+
+	public ${realType}[] get${Utils.firstCharUp($obj.name)}() {
+		readLock();
+		try {
+		return (${realType}[]) ${getterMethod}("$obj.name");
+		} finally {
+			readUnlock();
+		}
+	}
+
+	public void set${Utils.firstCharUp($obj.name)}(${realType}[] $obj.name) {
+		${realType} oldVal[] = null;
+		writeLock();
+		try {
+        oldVal = (${realType}[]) ${getterMethod}("$obj.name");
+        ${setterMethod}("$obj.name", $obj.name);
+        _postSet("$obj.name", oldVal, $obj.name);
+		} finally {
+			writeUnlock();
+		}
+		#if($isAttr)
+		firePropertyChange("$obj.name", oldVal, $obj.name);
+		#else
+		fireNodeChange("$obj.name", oldVal, $obj.name);
+		#end
+	}
+
+	public ${realType} get${Utils.firstCharUp($obj.name)}(int i) {
+		readLock();
+		try {
+		${realType}[] arr = (${realType}[]) ${getterMethod}("$obj.name");
+		return arr[i];
+		} finally {
+			readUnlock();
+		}
+	}
+	
+	public void set${Utils.firstCharUp($obj.name)}(int i, ${realType} obj) {
+		#if( $isAttr )
+		${Utils.wrapper($obj.type)} oldVal = null;
+		#else
+		${realType} oldVal = null;
+		#end
+		writeLock();
+		try {
+		${realType} arr[] = (${realType}[]) ${getterMethod}("$obj.name");
+		oldVal = arr[i];
+		arr[i] = obj;
+		_postSet("$obj.name", arr, arr);
+		} finally {
+			writeUnlock();
+		}
+		#if($isAttr)
+		fireIndexedPropertyChange("$obj.name", i, oldVal, obj);
+		#else
+		fireIndexedNodeChange("$obj.name", i, oldVal, obj);
+		#end
+	}
+	
+	public void add${Utils.firstCharUp($obj.name)}(${realType} obj) {	
+		${realType} oldArr[] = null, newArr[] = null;
+		writeLock();
+		try {
+		oldArr = (${realType}[]) ${getterMethod}("$obj.name");
+		ArrayList list = arrayToList(oldArr);	
+		list.add(obj);
+		newArr = (${realType}[])listToArray(list, ${Utils.getComponentType($realType)});
+		${setterMethod}("$obj.name", newArr);
+        _postSet("$obj.name", oldArr, newArr);
+		} finally {
+			writeUnlock();
+		}
+		#if($isAttr)
+		firePropertyChange("$obj.name", oldArr, newArr);
+		#else
+		fireNodeChange("$obj.name", oldArr, newArr);
+		#end
+	}
+	
+	public void add${Utils.firstCharUp($obj.name)}(int i, ${realType} obj) {
+		${realType} oldArr[] = null, newArr[] = null;
+		writeLock();
+		try {
+		oldArr = (${realType}[]) ${getterMethod}("$obj.name");
+		ArrayList list = arrayToList(oldArr);
+		list.add(i, obj);
+		newArr = (${realType}[])listToArray(list, ${Utils.getComponentType($realType)});
+		${setterMethod}("$obj.name", newArr);
+		_postSet("$obj.name", oldArr, newArr);
+		} finally {
+			writeUnlock();
+		}
+		#if($isAttr)
+		firePropertyChange("$obj.name", oldArr, newArr);
+		#else
+		fireNodeChange("$obj.name", oldArr, newArr);
+		#end
+	}
+	
+	#if($Utils.isNullableType($realType))
+	/**
+	 * This method works base on object reference equality to remove
+	 * the desired element inside array, so be careful, It wont
+	 * work base equals() method.
+	 */
+	public ${realType} _remove${Utils.firstCharUp($obj.name)}(${realType} obj) {
+		${realType} oldArr[] = null, newArr[] = null;
+		int idx = -1;
+		writeLock();
+		try {
+		oldArr = (${realType}[]) ${getterMethod}("$obj.name");
+		ArrayList list = arrayToList(oldArr);
+		idx = indexOf(list, obj);		
+		if(idx != -1) {
+			list.remove(idx);
+			newArr = (${realType}[])listToArray(list, ${Utils.getComponentType($realType)});
+			${setterMethod}("$obj.name", newArr);
+			_postSet("$obj.name", oldArr, newArr);
+		}	
+		} finally {
+			writeUnlock();
+		}
+		#if($isAttr)
+		firePropertyChange("$obj.name", oldArr, newArr);
+		#else
+		fireNodeChange("$obj.name", oldArr, newArr);
+		#end
+		return idx == -1 ? null : obj;
+	}
+	#end
+	
+	/**
+	 * removes element at index i.
+	 */	
+	public ${realType} remove${Utils.firstCharUp($obj.name)}(int i) {
+		${realType} oldArr[] = null, newArr[] = null;
+		${Utils.wrapper($realType)} obj = null;
+		writeLock();
+		try {
+		oldArr = (${realType}[]) ${getterMethod}("$obj.name");
+		ArrayList list = arrayToList(oldArr);
+		obj = (${Utils.wrapper($realType)})list.remove(i);
+		newArr = (${realType}[])listToArray(list, ${Utils.getComponentType($realType)});
+		${setterMethod}("$obj.name", newArr);
+		_postSet("$obj.name", oldArr, newArr);
+		} finally {
+			writeUnlock();
+		}
+		#if($isAttr)
+		firePropertyChange("$obj.name", oldArr, newArr);
+		#else
+		fireNodeChange("$obj.name", oldArr, newArr);
+		#end
+		return obj;
+	}
+	
+	public void clear${Utils.firstCharUp($obj.name)}() {
+		set${Utils.firstCharUp($obj.name)}(new ${realType}[0]);
+	}
