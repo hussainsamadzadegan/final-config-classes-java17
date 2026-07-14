@@ -17,6 +17,10 @@
 	</description>
 
 	<properties>
+		<maven-compiler-plugin.version>3.13.0</maven-compiler-plugin.version>
+		<maven-shade-plugin.version>3.6.0</maven-shade-plugin.version>
+		<exec-maven-plugin.version>3.4.1</exec-maven-plugin.version>
+		<spring-boot.version>3.3.4</spring-boot.version>
 		<project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
 		<maven.compiler.release>17</maven.compiler.release>
 
@@ -92,8 +96,37 @@
 			<version>${slf4j.version}</version>
 			<scope>runtime</scope>
 		</dependency>
+		<dependency>
+			<groupId>com.finalconfigclasses</groupId>
+			<artifactId>configclasses-framework</artifactId>
+			<version>3.0.0</version>
+		</dependency>
+		<dependency>
+			<groupId>org.springframework.boot</groupId>
+			<artifactId>spring-boot-starter-web</artifactId>
+			<exclusions>
+				<!-- project already provides its own SLF4J binding (slf4j-simple, below) -->
+				<exclusion>
+					<groupId>org.springframework.boot</groupId>
+					<artifactId>spring-boot-starter-logging</artifactId>
+				</exclusion>
+			</exclusions>
+		</dependency>
 	</dependencies>
-
+	<dependencyManagement>
+		<dependencies>
+			<!-- Aligns Spring/Jackson/Tomcat versions for the single starter
+			     below without inheriting spring-boot-starter-parent, so the
+			     existing packaging/plugin setup stays untouched. -->
+			<dependency>
+				<groupId>org.springframework.boot</groupId>
+				<artifactId>spring-boot-dependencies</artifactId>
+				<version>3.3.4</version>
+				<type>pom</type>
+				<scope>import</scope>
+			</dependency>
+		</dependencies>
+	</dependencyManagement>
 	<build>
 		<finalName>${project.artifactId}-${project.version}</finalName>
 		<plugins>
