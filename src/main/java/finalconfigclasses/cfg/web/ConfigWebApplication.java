@@ -38,7 +38,7 @@ public class ConfigWebApplication {
                 "/app/config",              // propertiesFile -> ZK root path
                 "cache-config-lock",         // lockID
                 new ReentrantReadWriteLock(),// propertiesLock
-                "prodw",                      // document
+                "node1-d",                      // document
                 null,                        // name
                 null                         // keyPrefix
         );
