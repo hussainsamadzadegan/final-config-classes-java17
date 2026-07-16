@@ -28,7 +28,7 @@ public abstract class BaseConfigBean implements ConfigBean {
 	private static final long serialVersionUID = 4538796607883032497L;
 	
 	/** The unique ID of bean(needed for clone and merge algorithms). */
-	private final String beanID;
+	private volatile String beanID;
 	/** Contains the value of simple attributes. */
     private final HashMap<String, Object> attr = new HashMap<String, Object>();
     /** Contains the reference to other related ConfigBeans. */
@@ -377,7 +377,7 @@ public abstract class BaseConfigBean implements ConfigBean {
 			HashMap<String, Boolean> cloneDynaProp = null;
 			if(dynaProp != null)
 				cloneDynaProp = (HashMap<String, Boolean>)dynaProp.clone(); 
-			cloneObj = (BaseConfigBean)c.newInstance(_getBeanID(), cloneDefValue,
+			cloneObj = (BaseConfigBean)c.newInstance(getBeanID(), cloneDefValue,
 					cloneDynaProp,
 					parentOfCloned,
 					propertiesFile,
@@ -678,10 +678,14 @@ public abstract class BaseConfigBean implements ConfigBean {
 	
 	public abstract String _getXPath();
 	
-	public String _getBeanID() {
+	public String getBeanID() {
 		return beanID;
 	}
-	
+
+	public void setBeanID(String beanID) {
+		this.beanID = beanID;
+	}
+
 	public Class<?> _getBeanClass() {
 		return getClass();
 	}

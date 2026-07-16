@@ -1,8 +1,11 @@
 package finalconfigclasses.cfg.web;
 
+import com.thoughtworks.xstream.XStream;
 import finalconfigclasses.cfg.ConfigBean;
 import finalconfigclasses.cfg.ConfigException;
 import finalconfigclasses.cfg.Registry;
+import finalconfigclasses.cfg.gen.BankConfigImpl;
+import finalconfigclasses.cfg.misc.LoadAllVisitor;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
@@ -12,6 +15,9 @@ import java.beans.PropertyDescriptor;
 import java.lang.reflect.Array;
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.IdentityHashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -27,16 +33,18 @@ public class ConfigValuesController {
             "beanUpdateListeners", "propertiesLock"
     );
 
+    private static final int MAX_DEPTH = 32;
+
     @GetMapping("/{className}")
-    public ResponseEntity<Map<String, Object>> load(@PathVariable String className) {
+    public ResponseEntity<Map<String, Object>> load(@PathVariable("className") String className) {
         try {
             ConfigBean bean = Registry.getInstance().getConfig(className);
             if (bean == null) {
                 return ResponseEntity.notFound().build();
             }
             try {
-                bean.load();
-            } catch (ConfigException e) {
+                bean.accept(new LoadAllVisitor());
+            } catch (Exception e) {
                 throw new RuntimeException("Failed to load config: " + className, e);
             }
             return ResponseEntity.ok(extractAttributes(bean));
@@ -46,26 +54,48 @@ public class ConfigValuesController {
     }
 
     @PutMapping("/{className}")
-    public ResponseEntity<Void> save(@PathVariable String className,
+    public ResponseEntity<Void> save(@PathVariable("className") String className,
                                      @RequestBody Map<String, Object> values) {
         try {
-            ConfigBean bean = Registry.getInstance().getConfig(className);
+            ConfigBean bean = new BankConfigImpl();//Registry.getInstance().getConfig(className);
             if (bean == null) {
                 return ResponseEntity.notFound().build();
             }
             applyAttributes(bean, values);
-            try {
-                bean.save();
-            } catch (ConfigException e) {
-                throw new RuntimeException("Failed to save config: " + className, e);
-            }
+            String clonedVersionXML = new XStream().toXML(bean);
+            Registry.getInstance().importConfig("BankConfigImpl", clonedVersionXML, true);
+//            try {
+//                bean.save();
+//            } catch (ConfigException e) {
+//                throw new RuntimeException("Failed to save config: " + className, e);
+//            }
             return ResponseEntity.ok().build();
         } catch (ConfigException e) {
             return ResponseEntity.notFound().build();
         }
     }
 
+    // ---- read path: recursive extraction so EXCLUDED is enforced at every depth ----
+
     private Map<String, Object> extractAttributes(ConfigBean bean) {
+        return extractAttributes(bean, new IdentityHashMap<>(), 0);
+    }
+
+    private Map<String, Object> extractAttributes(ConfigBean bean, Map<Object, Object> seen, int depth) {
+        if (bean == null) {
+            return null;
+        }
+        if (depth > MAX_DEPTH) {
+            throw new RuntimeException("ConfigBean hierarchy too deep (possible cycle) at " + bean.getClass());
+        }
+        if (seen.containsKey(bean)) {
+            // Cyclic reference back to an ancestor bean - don't recurse again.
+            Map<String, Object> cyclic = new LinkedHashMap<>();
+            cyclic.put("$ref", bean.getClass().getName());
+            return cyclic;
+        }
+        seen.put(bean, Boolean.TRUE);
+
         Map<String, Object> result = new LinkedHashMap<>();
         try {
             BeanInfo info = Introspector.getBeanInfo(bean.getClass(), Object.class);
@@ -74,13 +104,63 @@ public class ConfigValuesController {
                 if (EXCLUDED.contains(name) || name.startsWith("_")) continue;
                 Method getter = pd.getReadMethod();
                 if (getter == null) continue;
-                result.put(name, getter.invoke(bean));
+
+                Object rawValue = getter.invoke(bean);
+                result.put(name, extractValue(rawValue, seen, depth + 1));
             }
         } catch (Exception e) {
             throw new RuntimeException("Failed reading attributes of " + bean.getClass(), e);
+        } finally {
+            seen.remove(bean);
         }
         return result;
     }
+
+    @SuppressWarnings("unchecked")
+    private Object extractValue(Object value, Map<Object, Object> seen, int depth) {
+        if (value == null) {
+            return null;
+        }
+
+        // Nested config bean -> recurse into its own filtered attribute map
+        if (value instanceof ConfigBean) {
+            return extractAttributes((ConfigBean) value, seen, depth);
+        }
+
+        // Array (of config beans or plain values) -> List, recursing element-wise
+        if (value.getClass().isArray()) {
+            int len = Array.getLength(value);
+            List<Object> list = new ArrayList<>(len);
+            for (int i = 0; i < len; i++) {
+                list.add(extractValue(Array.get(value, i), seen, depth + 1));
+            }
+            return list;
+        }
+
+        // Collection -> List, recursing element-wise
+        if (value instanceof Collection) {
+            List<Object> list = new ArrayList<>(((Collection<?>) value).size());
+            for (Object element : (Collection<Object>) value) {
+                list.add(extractValue(element, seen, depth + 1));
+            }
+            return list;
+        }
+
+        // Map -> recurse into values
+        if (value instanceof Map) {
+            Map<Object, Object> src = (Map<Object, Object>) value;
+            Map<Object, Object> out = new LinkedHashMap<>();
+            for (Map.Entry<Object, Object> e : src.entrySet()) {
+                out.put(e.getKey(), extractValue(e.getValue(), seen, depth + 1));
+            }
+            return out;
+        }
+
+        // Primitive, String, enum, wrapper types, etc. -> leave as-is
+        return value;
+    }
+
+    // ---- write path: unchanged from your existing recursive applyAttributes ----
 
     private void applyAttributes(ConfigBean bean, Map<String, Object> values) {
         try {
@@ -104,6 +184,7 @@ public class ConfigValuesController {
                     ConfigBean nested = getter != null ? (ConfigBean) getter.invoke(bean) : null;
                     if (nested == null) nested = (ConfigBean) type.getDeclaredConstructor().newInstance();
                     applyAttributes(nested, (Map<String, Object>) raw);
+                    nested.save();
                     arg = nested;
                 } else if (raw instanceof List && type.isArray()
                         && ConfigBean.class.isAssignableFrom(type.getComponentType())) {
@@ -114,7 +195,10 @@ public class ConfigValuesController {
                     for (int i = 0; i < list.size(); i++) {
                         Object item = list.get(i);
                         ConfigBean elem = (ConfigBean) comp.getDeclaredConstructor().newInstance();
-                        if (item instanceof Map) applyAttributes(elem, (Map<String, Object>) item);
+                        if (item instanceof Map) {
+                            applyAttributes(elem, (Map<String, Object>) item);
+                            elem.save();
+                        }
                         Array.set(arr, i, elem);
                     }
                     arg = arr;
@@ -132,10 +216,8 @@ public class ConfigValuesController {
         }
     }
 
-
     private Object convert(Object raw, Class<?> targetType) {
         if (raw == null) {
-            // primitive arrays can't be null; return empty array instead
             if (targetType.isArray() && targetType.getComponentType().isPrimitive()) {
                 return java.lang.reflect.Array.newInstance(targetType.getComponentType(), 0);
             }
@@ -157,5 +239,4 @@ public class ConfigValuesController {
         if (targetType == boolean.class|| targetType == Boolean.class) return Boolean.valueOf(s);
         return s;
     }
-
 }

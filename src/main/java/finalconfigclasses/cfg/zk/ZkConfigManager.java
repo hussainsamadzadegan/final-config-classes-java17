@@ -5,7 +5,12 @@ import finalconfigclasses.cfg.ConfigBean;
 import finalconfigclasses.cfg.ConfigException;
 import finalconfigclasses.cfg.misc.UnwatchAllVisitor;
 import finalconfigclasses.cfg.misc.WatchAllVisitor;
-import org.apache.zookeeper.*;
+import org.apache.curator.framework.CuratorFramework;
+import org.apache.curator.framework.CuratorFrameworkFactory;
+import org.apache.curator.framework.recipes.cache.NodeCache;
+import org.apache.curator.framework.state.ConnectionState;
+import org.apache.curator.retry.ExponentialBackoffRetry;
+import org.apache.zookeeper.KeeperException;
 import org.apache.zookeeper.data.Stat;
 
 import java.util.IdentityHashMap;
@@ -13,7 +18,7 @@ import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
-import java.util.concurrent.ThreadFactory;
+import java.util.concurrent.TimeUnit;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
@@ -29,7 +34,7 @@ public final class ZkConfigManager {
 		return SingletonHolder.THE_ONE;
 	}
 
-	private volatile ZooKeeper client;
+	private volatile CuratorFramework client;
 	private final Object startLock = new Object();
 
 	private final Map<ConfigBean, ZkBeanWatcher> watches = new IdentityHashMap<>();
@@ -54,23 +59,45 @@ public final class ZkConfigManager {
 		synchronized (startLock) {
 			if (client != null) return;
 			try {
-				client = new ZooKeeper(connectString, sessionTimeout, event -> {});
-				// Wait for connection
-				long deadline = System.currentTimeMillis() + 15000;
-				while (client.getState() != ZooKeeper.States.CONNECTED && System.currentTimeMillis() < deadline) {
-					Thread.sleep(200);
-				}
+				CuratorFramework curatorClient = CuratorFrameworkFactory.builder()
+						.connectString(connectString)
+						.sessionTimeoutMs(sessionTimeout)
+						.connectionTimeoutMs(15000)
+						.retryPolicy(new ExponentialBackoffRetry(1000, 5))
+						.build();
+
+				curatorClient.getConnectionStateListenable().addListener(this::onConnectionStateChanged);
+				curatorClient.start();
+				curatorClient.blockUntilConnected(15, TimeUnit.SECONDS);
+				client = curatorClient;
 			} catch (Exception e) {
 				throw new RuntimeException("Failed to connect to ZooKeeper", e);
 			}
 		}
 	}
 
-	public void useClient(ZooKeeper zk) {
-		this.client = zk;
+	private void onConnectionStateChanged(CuratorFramework c, ConnectionState newState) {
+		switch (newState) {
+			case LOST:
+				LOG.warning("ZooKeeper session lost - Curator will establish a new session on reconnect");
+				break;
+			case RECONNECTED:
+				LOG.warning("ZooKeeper reconnected with a NEW session - active NodeCache watches resync automatically");
+				break;
+			case SUSPENDED:
+				LOG.warning("ZooKeeper connection suspended - operations will retry per RetryPolicy");
+				break;
+			default:
+				break;
+		}
 	}
 
-	public ZooKeeper getClient() {
+	/** Kept for tests/manual wiring; now takes a CuratorFramework instead of a raw ZooKeeper handle. */
+	public void useClient(CuratorFramework curatorClient) {
+		this.client = curatorClient;
+	}
+
+	public CuratorFramework getClient() {
 		if (client == null) throw new IllegalStateException("ZkConfigManager not started");
 		return client;
 	}
@@ -78,21 +105,14 @@ public final class ZkConfigManager {
 	/** Ensures full path exists (recursive parent creation) */
 	private void ensurePathExists(String path) throws Exception {
 		if (path == null || path.equals("/")) return;
-		ZooKeeper zk = getClient();
-		String[] parts = path.substring(1).split("/");
-		StringBuilder current = new StringBuilder();
-		for (String part : parts) {
-			if (part.isEmpty()) continue;
-			current.append("/").append(part);
-			String currPath = current.toString();
+		CuratorFramework zk = getClient();
+		Stat stat = zk.checkExists().forPath(path);
+		if (stat == null) {
 			try {
-				Stat stat = zk.exists(currPath, false);
-				if (stat == null) {
-					zk.create(currPath, new byte[0], ZooDefs.Ids.OPEN_ACL_UNSAFE, CreateMode.PERSISTENT);
-					LOG.info("Created znode: " + currPath);
-				}
+				zk.create().creatingParentsIfNeeded().forPath(path, new byte[0]);
+				LOG.info("Created znode: " + path);
 			} catch (KeeperException.NodeExistsException ignored) {
-				// already exists
+				// already exists (race)
 			}
 		}
 	}
@@ -105,19 +125,20 @@ public final class ZkConfigManager {
 		synchronized (watchLock) {
 			if (watches.containsKey(bean)) return;
 
-			ZkBeanWatcher watcher = new ZkBeanWatcher(bean, path);
-			watches.put(bean, watcher);
-
 			try {
 				ensurePathExists(path);
-				getClient().exists(path, watcher); // register watcher
+
+				NodeCache nodeCache = new NodeCache(getClient(), path);
+				ZkBeanWatcher watcher = new ZkBeanWatcher(bean, path, nodeCache);
+				nodeCache.getListenable().addListener(watcher::onNodeChanged);
+				nodeCache.start();
+
+				watches.put(bean, watcher);
 			} catch (Exception e) {
 				LOG.log(Level.WARNING, "Failed to watch " + path, e);
 			}
 		}
 	}
-
-	// watchSubtree, unwatch, etc. unchanged...
 
 	public void watchSubtree(ConfigBean root) throws ConfigException {
 		try {
@@ -167,40 +188,49 @@ public final class ZkConfigManager {
 			watches.clear();
 		}
 		reloadExecutor.shutdown();
-		ZooKeeper c = client;
+		CuratorFramework c = client;
 		if (c != null) {
 			try { c.close(); } catch (Exception ignored) {}
 			client = null;
 		}
 	}
 
-	private class ZkBeanWatcher implements Watcher {
+	/**
+	 * Wraps a Curator NodeCache instead of a raw one-shot Watcher.
+	 * NodeCache re-establishes its own watch after every reconnect/session
+	 * replacement, so - unlike the old raw-Watcher version - this survives
+	 * SessionExpiredException without any manual re-registration.
+	 */
+	private class ZkBeanWatcher {
 		private final ConfigBean bean;
 		private final String path;
+		private final NodeCache nodeCache;
 		private volatile boolean closed = false;
+		private volatile boolean first = true;
 
-		ZkBeanWatcher(ConfigBean bean, String path) {
+		ZkBeanWatcher(ConfigBean bean, String path, NodeCache nodeCache) {
 			this.bean = bean;
 			this.path = path;
+			this.nodeCache = nodeCache;
 		}
 
-		@Override
-		public void process(WatchedEvent event) {
-			if (closed || !path.equals(event.getPath())) return;
-			if (event.getType() == Watcher.Event.EventType.NodeDataChanged ||
-					event.getType() == Watcher.Event.EventType.NodeCreated) {
-				scheduleReload(bean, path);
+		void onNodeChanged() {
+			if (closed) return;
+			// NodeCache fires once immediately on start() with the current
+			// data; skip that initial callback so we don't reload right
+			// after the bean was just loaded/watched.
+			if (first) {
+				first = false;
+				return;
 			}
-			// Re-register
-			if (!closed) {
-				try {
-					getClient().exists(path, this);
-				} catch (Exception ignored) {}
-			}
+			scheduleReload(bean, path);
 		}
 
 		void close() {
 			closed = true;
+			try {
+				nodeCache.close();
+			} catch (Exception ignored) {}
 		}
 	}
 }

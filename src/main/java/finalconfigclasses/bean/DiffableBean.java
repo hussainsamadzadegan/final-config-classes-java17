@@ -24,7 +24,9 @@ public interface DiffableBean {
 	 * do not change the default implementation and use what is provided in
 	 * API.
 	 */
-	public String _getBeanID();
+	public String getBeanID();
+
+	public void setBeanID(String beanID);
 	
 	/**
 	 * The interface or class which this method returns

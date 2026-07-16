@@ -514,7 +514,7 @@ public class ConfigDiffHelper
         if(!(obj instanceof ConfigBean))
             return obj;
         else {
-        	return ((ConfigBean)obj)._getBeanID();
+        	return ((ConfigBean)obj).getBeanID();
         }
     }
 

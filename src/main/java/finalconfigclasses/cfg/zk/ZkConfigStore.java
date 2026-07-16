@@ -5,10 +5,8 @@ import java.util.Map;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
-import org.apache.zookeeper.CreateMode;
+import org.apache.curator.framework.CuratorFramework;
 import org.apache.zookeeper.KeeperException;
-import org.apache.zookeeper.ZooDefs;
-import org.apache.zookeeper.ZooKeeper;
 import org.apache.zookeeper.data.Stat;
 
 import com.thoughtworks.xstream.XStream;
@@ -17,7 +15,9 @@ import com.thoughtworks.xstream.io.xml.StaxDriver;
 import finalconfigclasses.cfg.ConfigException;
 
 /**
- * Persists/loads using native ZooKeeper client.
+ * Persists/loads using CuratorFramework (Curator handles session-expiry
+ * recovery and retries per its RetryPolicy - the raw ZooKeeper client this
+ * used to take did neither).
  */
 public final class ZkConfigStore {
 
@@ -65,18 +65,18 @@ public final class ZkConfigStore {
 		return m.replaceAll("/$1");
 	}
 
-	public static ZkAttrSnapshot loadAttributes(ZooKeeper client, String rootPath, String document,
+	public static ZkAttrSnapshot loadAttributes(CuratorFramework client, String rootPath, String document,
 												String xpath, boolean createPathIfAbsent) throws Exception {
 		String znodePath = buildZnodePath(rootPath, document, xpath);
 		byte[] data;
 		try {
-			data = client.getData(znodePath, false, null);
+			data = client.getData().forPath(znodePath);
 		} catch (KeeperException.NoNodeException nne) {
 			if (!createPathIfAbsent) {
 				throw new ConfigException("ZooKeeper node not found: " + znodePath, nne);
 			}
 			try {
-				client.create(znodePath, new byte[0], ZooDefs.Ids.OPEN_ACL_UNSAFE, CreateMode.PERSISTENT);
+				client.create().creatingParentsIfNeeded().forPath(znodePath, new byte[0]);
 			} catch (KeeperException.NodeExistsException raceIgnored) {}
 			return new ZkAttrSnapshot();
 		}
@@ -90,52 +90,43 @@ public final class ZkConfigStore {
 	}
 
 	/** Ensures full path exists (recursive parent creation) */
-	private static void ensurePathExists(ZooKeeper client, String path) throws Exception {
+	private static void ensurePathExists(CuratorFramework client, String path) throws Exception {
 		if (path == null || path.equals("/")) return;
-		ZooKeeper zk = client;
-		String[] parts = path.substring(1).split("/");
-		StringBuilder current = new StringBuilder();
-		for (String part : parts) {
-			if (part.isEmpty()) continue;
-			current.append("/").append(part);
-			String currPath = current.toString();
+		Stat stat = client.checkExists().forPath(path);
+		if (stat == null) {
 			try {
-				Stat stat = zk.exists(currPath, false);
-				if (stat == null) {
-					zk.create(currPath, new byte[0], ZooDefs.Ids.OPEN_ACL_UNSAFE, CreateMode.PERSISTENT);
-
-				}
+				client.create().creatingParentsIfNeeded().forPath(path, new byte[0]);
 			} catch (KeeperException.NodeExistsException ignored) {
-				// already exists
+				// already exists (race)
 			}
 		}
 	}
 
-	public static void saveAttributes(ZooKeeper client, String rootPath, String document, String xpath,
+	public static void saveAttributes(CuratorFramework client, String rootPath, String document, String xpath,
 									  Map<String, Object> values, Map<String, Boolean> setFlags, boolean createPathIfAbsent) throws Exception {
 		String znodePath = buildZnodePath(rootPath, document, xpath);
 
 		// Ensure path exists before save
 		try {
-			ensurePathExists(client, znodePath); // reuse helper if public, or duplicate logic
+			ensurePathExists(client, znodePath);
 		} catch (Exception e) {
 			// fallback
 		}
 		ZkAttrSnapshot snap = new ZkAttrSnapshot(values, setFlags);
 		byte[] data = XSTREAM.toXML(snap).getBytes(StandardCharsets.UTF_8);
 
-		Stat stat = client.exists(znodePath, false);
+		Stat stat = client.checkExists().forPath(znodePath);
 		if (stat == null) {
 			if (!createPathIfAbsent) {
 				throw new ConfigException("ZooKeeper node not found: " + znodePath);
 			}
 			try {
-				client.create(znodePath, data, ZooDefs.Ids.OPEN_ACL_UNSAFE, CreateMode.PERSISTENT);
+				client.create().creatingParentsIfNeeded().forPath(znodePath, data);
 			} catch (KeeperException.NodeExistsException race) {
-				client.setData(znodePath, data, -1);
+				client.setData().forPath(znodePath, data);
 			}
 		} else {
-			client.setData(znodePath, data, -1);
+			client.setData().forPath(znodePath, data);
 		}
 	}
 
