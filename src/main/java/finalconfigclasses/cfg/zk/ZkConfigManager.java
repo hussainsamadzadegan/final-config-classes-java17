@@ -8,6 +8,7 @@ import finalconfigclasses.cfg.ConfigDiffHelper;
 import finalconfigclasses.cfg.ConfigException;
 import finalconfigclasses.cfg.Registry;
 import finalconfigclasses.cfg.gen.BankConfigImpl;
+import finalconfigclasses.cfg.misc.SimpleDfsEditStrategy;
 import finalconfigclasses.cfg.misc.UnwatchAllVisitor;
 import finalconfigclasses.cfg.misc.WatchAllVisitor;
 import org.apache.curator.framework.CuratorFramework;
@@ -182,26 +183,23 @@ public final class ZkConfigManager {
 						+ " | Node: " + System.getProperty("node.id", "unknown"));
 
 				if (bean instanceof BankConfigImpl liveBean) {
-					// 1. Clone the CURRENT state BEFORE loading new data
-					BankConfigImpl originalState = (BankConfigImpl) liveBean.clone();
+					// 1. Full deep clone of CURRENT state (preserves child beans like
+					//    jasperReportTemplateCacheConfig/cacheConfigs so computeChildDiff
+					//    doesn't see them as "removed"). liveBean itself is NOT touched.
+					BankConfigImpl proposedBean = (BankConfigImpl) liveBean.cloneSubtree();
 
-					// 2. Load latest data from ZooKeeper
-					liveBean.load();
+					// 2. Load fresh ZK data into the CLONE, not the live bean.
+					//    load() only reads/writes its own attr map (tmpFolder, descriptions),
+					//    so this only refreshes the clone's top-level attributes.
+					proposedBean.load();
 
-					// 3. Now compute diff between old state and new loaded state
-					ConfigDiffHelper diffHelper = originalState._newDiffHelper();
-					diffHelper.computeDiff(liveBean);   // Note: source = old, target = new (live)
+					// 3. Diff the untouched liveBean (still OLD values) against the
+					//    freshly-loaded clone (NEW values) -> real PropertyUpdate list.
+					SimpleDfsEditStrategy editStrategy = new SimpleDfsEditStrategy(liveBean, proposedBean);
+					editStrategy.computeDiff();
+					editStrategy.applyUpdate(false, false); // false: don't re-save to ZK, we just read this from there
 
-					if (diffHelper.getBeanDiff() != null && diffHelper.getBeanDiff().size() > 0) {
-						System.out.println("[Zk] UpdateSet size: " + diffHelper.getBeanDiff().size());
-						System.out.println(diffHelper.getBeanDiff());
-					} else {
-						System.out.println("[Zk] No changes detected after load");
-					}
-					// 4. Trigger BeanUpdate flow
-					diffHelper.applyUpdate();
-
-					System.out.println("[Zk] BeanUpdateEvent triggered on remote node");
+					System.out.println("[Zk] BeanUpdateEvent triggered on remote node with real diff");
 				} else {
 					bean.load();
 				}

@@ -93,12 +93,16 @@ public final class SimpleDfsEditStrategy extends EditStrategy {
 	}
 	
 	public final void applyUpdate() {
-        if (applyUpdateCalled)
-            throw new IllegalStateException("applyUpdate() has already called");		
+        applyUpdate(true, false);
+	}
+
+	public final void applyUpdate(boolean saveInFile, boolean makeThreadSafe) {
+		if (applyUpdateCalled)
+			throw new IllegalStateException("applyUpdate() has already called");
 		if (diffHelper == null || diffHelper.getBeanDiff() == null)
 			throw new IllegalStateException(
 					"applyUpdate() called without first calling computeDiff()");
-		
+
 		applyUpdateCalled = true;
 		prepareUpdate();
 		if(editResult.isRejected()) {
@@ -106,8 +110,8 @@ public final class SimpleDfsEditStrategy extends EditStrategy {
 		} else {
 			_applyUpdate();
 			activateUpdate();
-			boolean save = paramMap.getBoolean(Constants.SAVE_IN_FILE, true);
-			boolean threadSafe = paramMap.getBoolean(Constants.MAKE_THREAD_SAFE, false);
+			boolean save = paramMap.getBoolean(Constants.SAVE_IN_FILE, saveInFile);
+			boolean threadSafe = paramMap.getBoolean(Constants.MAKE_THREAD_SAFE, makeThreadSafe);
 			if(save) {
 				saveUpdate();
 			}
