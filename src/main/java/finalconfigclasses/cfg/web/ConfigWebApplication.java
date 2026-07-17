@@ -1,13 +1,12 @@
 package finalconfigclasses.cfg.web;
 
-import finalconfigclasses.bean.BeanUpdateEvent;
-import finalconfigclasses.bean.BeanUpdateFailedException;
-import finalconfigclasses.bean.BeanUpdateListener;
-import finalconfigclasses.bean.BeanUpdateRejectedException;
+import finalconfigclasses.bean.*;
 import finalconfigclasses.cfg.ConfigBean;
+import finalconfigclasses.cfg.ConfigBeanUpdateEvent;
 import finalconfigclasses.cfg.Registry;
 import finalconfigclasses.cfg.gen.BankConfigImpl;
 import finalconfigclasses.cfg.gen.CacheConfigImpl;
+import finalconfigclasses.cfg.gen.clustershareddemo.CacheConfigZkExample;
 import finalconfigclasses.cfg.misc.SaveAllVisitor;
 import finalconfigclasses.cfg.zk.ZkConfigManager;
 import org.springframework.boot.SpringApplication;
@@ -16,6 +15,7 @@ import org.springframework.boot.autoconfigure.SpringBootApplication;
 import java.beans.PropertyChangeEvent;
 import java.beans.PropertyChangeListener;
 import java.util.HashMap;
+import java.util.List;
 import java.util.concurrent.locks.ReentrantReadWriteLock;
 
 /**
@@ -71,12 +71,24 @@ public class ConfigWebApplication {
                 "cache-configs"                         // keyPrefix
         );
 
+        CacheConfigImpl ccimpl3 = new CacheConfigImpl(
+                defValue,
+                dymaval,
+                (ConfigBean) null,
+                "/app/config",              // propertiesFile -> ZK root path
+                "cache-config-lock",         // lockID
+                new ReentrantReadWriteLock(),// propertiesLock
+                "bank-ear",                      // document
+                "null2",                        // name
+                "cache-configs2"                         // keyPrefix
+        );
+
 
         HashMap<String, Object> defaults = new HashMap<String, Object>();
         defaults.put("tmpFolder", "c:/");
         defaults.put("descriptions", new String[]{"a", "b", "c", "d"});
-        defaults.put("jasperReportTemplateCacheConfig", ccimpl);
-        defaults.put("cacheConfigs", new CacheConfigImpl[] {ccimpl2});
+        /*defaults.put("jasperReportTemplateCacheConfig", ccimpl);
+        defaults.put("cacheConfigs", new CacheConfigImpl[] {ccimpl2});*/
 
         HashMap<String, Object> dynaProp = new HashMap<String, Object>();
         dynaProp.put("tmpFolder",Boolean.TRUE);
@@ -96,15 +108,39 @@ public class ConfigWebApplication {
                 null,                        // name
                 null                         // keyPrefix
         );
-        liveConfig.setJasperReportTemplateCacheConfig(ccimpl);
-        liveConfig.addCacheConfigs(ccimpl2);
+        /*liveConfig.setJasperReportTemplateCacheConfig(ccimpl);
+        liveConfig.addCacheConfigs(ccimpl2);\
         liveConfig.addPropertyChangeListener(new PropertyChangeListener() {
             public void propertyChange(PropertyChangeEvent evt) {
                 System.out.println("propertyChange: " + evt.getPropertyName() + ", oldValue: " + evt.getOldValue() + ", newValue: " + evt.getNewValue());
             }
-        });
+        });*/
         liveConfig.addBeanUpdateListener(new BeanUpdateListener() {
             @Override
+            public void prepareUpdate(BeanUpdateEvent event) throws BeanUpdateRejectedException {
+                System.out.println("[Node " + System.getProperty("node.id") + "] prepareUpdate → " + event.getSourceBean().getClass().getSimpleName());
+
+                if (event instanceof ConfigBeanUpdateEvent configEvent) {
+                    List<PropertyUpdate> updates = configEvent.getUpdateList();
+                    System.out.println("   Updates (" + updates.size() + "):");
+                    for (PropertyUpdate u : updates) {
+                        System.out.println("     " + u);
+                    }
+                }
+            }
+
+            @Override
+            public void activateUpdate(BeanUpdateEvent event) throws BeanUpdateFailedException {
+                System.out.println("[Node " + System.getProperty("node.id") + "] activateUpdate → Changes applied");
+            }
+
+            @Override
+            public void rollbackUpdate(BeanUpdateEvent event) {
+                System.out.println("[Node " + System.getProperty("node.id") + "] rollbackUpdate");
+            }
+        });
+        /*liveConfig.getCacheConfigs(0).addBeanUpdateListener(new BeanUpdateListener() {8*
+            @Override
             public void rollbackUpdate(BeanUpdateEvent event) {
 
             }
@@ -118,29 +154,15 @@ public class ConfigWebApplication {
             public void prepareUpdate(BeanUpdateEvent event) throws BeanUpdateRejectedException {
                 System.out.println(event);
             }
-        });
-        liveConfig.getCacheConfigs(0).addBeanUpdateListener(new BeanUpdateListener() {
-            @Override
-            public void rollbackUpdate(BeanUpdateEvent event) {
-
-            }
-
-            @Override
-            public void activateUpdate(BeanUpdateEvent event) throws BeanUpdateFailedException {
-
-            }
-
-            @Override
-            public void prepareUpdate(BeanUpdateEvent event) throws BeanUpdateRejectedException {
-                System.out.println(event);
-            }
-        });
+        });*/
 
 
 //        liveConfig.load();
 //
 //        manager.watch(liveConfig);
-        //liveConfig.accept(new SaveAllVisitor());
+//        liveConfig.accept(new SaveAllVisitor());
+
+
 //        liveConfig.save();
 //        CacheBusinessComponent cacheComponent = new CacheBusinessComponent();
 
@@ -148,7 +170,27 @@ public class ConfigWebApplication {
 
 
         Registry.getInstance().putConfig("BankConfigImpl", liveConfig);
+//        SpringApplication.run(ConfigWebApplication.class, args);
+//        Registry.getInstance().putConfig("BankConfigImpl", liveConfig);
+
+        // === WATCH + LISTENER SETUP ===
+        ZkConfigManager.getInstance().watchSubtree(liveConfig);
+
+        CacheConfigZkExample example = new CacheConfigZkExample();
+        example.init(liveConfig);
+
+        // Start Spring Boot
         SpringApplication.run(ConfigWebApplication.class, args);
+
+        // Optional: graceful shutdown hook
+        Runtime.getRuntime().addShutdownHook(new Thread(() -> {
+            example.shutdown();
+            ZkConfigManager.getInstance().shutdown();
+        }));
+//        Thread.sleep(20000);
+//        liveConfig.addCacheConfigs(ccimpl3);
+//        liveConfig.accept(new SaveAllVisitor());
+//
         Thread.sleep(Long.MAX_VALUE);
     }
 }

@@ -6,42 +6,33 @@
   <name>FinalConfigClasses</name>
   <version>3.0.0</version>
   <description>XML-description-driven config bean code generator and runtime framework.
-		Java 17 / Apache Curator (ZooKeeper) / XStream edition - migrated from the
-		original Java 8 / Ant / JAXB / raw-XML-file version.</description>
+		Java 17 / Apache Curator (ZooKeeper) / XStream edition.</description>
   <build>
     <finalName>${project.artifactId}-${project.version}</finalName>
     <plugins>
       <plugin>
-        <artifactId>maven-dependency-plugin</artifactId>
-        <version>3.0.0</version>
-      </plugin>
-      <plugin>
         <artifactId>maven-compiler-plugin</artifactId>
-        <version>${maven-compiler-plugin.version}</version>
+        <version>3.13.0</version>
         <configuration>
-          <parameters>true</parameters>
+          <release>17</release>
         </configuration>
-      </plugin>
-      <plugin>
-        <groupId>org.codehaus.mojo</groupId>
-        <artifactId>exec-maven-plugin</artifactId>
-        <version>${exec-maven-plugin.version}</version>
       </plugin>
       <plugin>
         <artifactId>maven-shade-plugin</artifactId>
         <version>${maven-shade-plugin.version}</version>
         <executions>
           <execution>
+            <id>shade-main</id>
             <phase>package</phase>
             <goals>
               <goal>shade</goal>
             </goals>
             <configuration>
               <shadedArtifactAttached>true</shadedArtifactAttached>
-              <shadedClassifierName>generator</shadedClassifierName>
+              <shadedClassifierName>with-dependencies</shadedClassifierName>
               <transformers>
                 <transformer>
-                  <mainClass>finalconfigclasses.cfg.engine.ui.ConfigGeneratorApp</mainClass>
+                  <mainClass>finalconfigclasses.cfg.web.ConfigWebApplication</mainClass>
                 </transformer>
               </transformers>
             </configuration>
@@ -63,15 +54,12 @@
   </dependencyManagement>
   <properties>
     <maven.compiler.release>17</maven.compiler.release>
-    <spring-boot.version>3.3.4</spring-boot.version>
+    <maven-shade-plugin.version>3.6.0</maven-shade-plugin.version>
     <commons-beanutils.version>1.11.0</commons-beanutils.version>
+    <xstream.version>1.4.21</xstream.version>
     <slf4j.version>2.0.16</slf4j.version>
     <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
-    <maven-shade-plugin.version>3.6.0</maven-shade-plugin.version>
-    <maven-compiler-plugin.version>3.13.0</maven-compiler-plugin.version>
-    <xstream.version>1.4.21</xstream.version>
     <curator.version>5.9.0</curator.version>
     <velocity.version>2.4.1</velocity.version>
-    <exec-maven-plugin.version>3.4.1</exec-maven-plugin.version>
   </properties>
 </project>

@@ -1,6 +1,7 @@
 package finalconfigclasses.cfg.web;
 
 import com.thoughtworks.xstream.XStream;
+import com.thoughtworks.xstream.io.xml.StaxDriver;
 import finalconfigclasses.cfg.ConfigBean;
 import finalconfigclasses.cfg.ConfigException;
 import finalconfigclasses.cfg.Registry;
@@ -57,25 +58,34 @@ public class ConfigValuesController {
     public ResponseEntity<Void> save(@PathVariable("className") String className,
                                      @RequestBody Map<String, Object> values) {
         try {
-            ConfigBean bean = new BankConfigImpl();//Registry.getInstance().getConfig(className);
+            ConfigBean bean = Registry.getInstance().getConfig(className);
             if (bean == null) {
                 return ResponseEntity.notFound().build();
             }
-            applyAttributes(bean, values);
-            String clonedVersionXML = new XStream().toXML(bean);
-            Registry.getInstance().importConfig("BankConfigImpl", clonedVersionXML, true);
-//            try {
-//                bean.save();
-//            } catch (ConfigException e) {
-//                throw new RuntimeException("Failed to save config: " + className, e);
-//            }
-            return ResponseEntity.ok().build();
-        } catch (ConfigException e) {
-            return ResponseEntity.notFound().build();
-        }
-    }
 
-    // ---- read path: recursive extraction so EXCLUDED is enforced at every depth ----
+            // Apply changes to a proposed bean
+            applyAttributes(bean, values);
+
+            // === SAVE FULL OBJECT FOR BANKCONFIGIMPL ===
+            if (bean instanceof BankConfigImpl) {
+                XStream xstream = new XStream(new StaxDriver());
+                String fullXml = xstream.toXML(bean);
+
+                System.out.println("Saving FULL BankConfigImpl as XML to ZooKeeper");
+
+                // Save full bean
+                Registry.getInstance().importConfig("BankConfigImpl", fullXml, true);
+            } else {
+                // For other beans, keep snapshot behavior
+                bean.save();
+            }
+
+            return ResponseEntity.ok().build();
+        } catch (Exception e) {
+            e.printStackTrace();
+            return ResponseEntity.internalServerError().build();
+        }
+    }    // ---- read path: recursive extraction so EXCLUDED is enforced at every depth ----
 
     private Map<String, Object> extractAttributes(ConfigBean bean) {
         return extractAttributes(bean, new IdentityHashMap<>(), 0);

@@ -1,8 +1,13 @@
 // src/main/java/finalconfigclasses/cfg/zk/ZkConfigManager.java
 package finalconfigclasses.cfg.zk;
 
+import com.thoughtworks.xstream.XStream;
+import com.thoughtworks.xstream.io.xml.StaxDriver;
 import finalconfigclasses.cfg.ConfigBean;
+import finalconfigclasses.cfg.ConfigDiffHelper;
 import finalconfigclasses.cfg.ConfigException;
+import finalconfigclasses.cfg.Registry;
+import finalconfigclasses.cfg.gen.BankConfigImpl;
 import finalconfigclasses.cfg.misc.UnwatchAllVisitor;
 import finalconfigclasses.cfg.misc.WatchAllVisitor;
 import org.apache.curator.framework.CuratorFramework;
@@ -13,6 +18,7 @@ import org.apache.curator.retry.ExponentialBackoffRetry;
 import org.apache.zookeeper.KeeperException;
 import org.apache.zookeeper.data.Stat;
 
+import java.nio.charset.StandardCharsets;
 import java.util.IdentityHashMap;
 import java.util.Map;
 import java.util.Set;
@@ -169,17 +175,73 @@ public final class ZkConfigManager {
 		synchronized (pendingReloads) {
 			if (!pendingReloads.add(bean)) return;
 		}
+
 		reloadExecutor.submit(() -> {
 			try {
-				bean.load();
+				System.out.println("[Zk] Change detected on znode: " + path
+						+ " | Node: " + System.getProperty("node.id", "unknown"));
+
+				if (bean instanceof BankConfigImpl liveBean) {
+					// 1. Clone the CURRENT state BEFORE loading new data
+					BankConfigImpl originalState = (BankConfigImpl) liveBean.clone();
+
+					// 2. Load latest data from ZooKeeper
+					liveBean.load();
+
+					// 3. Now compute diff between old state and new loaded state
+					ConfigDiffHelper diffHelper = liveBean._newDiffHelper();
+					diffHelper.computeDiff(originalState);   // Note: source = old, target = new (live)
+
+					if (diffHelper.getBeanDiff() != null && diffHelper.getBeanDiff().size() > 0) {
+						System.out.println("[Zk] UpdateSet size: " + diffHelper.getBeanDiff().size());
+						System.out.println(diffHelper.getBeanDiff());
+					} else {
+						System.out.println("[Zk] No changes detected after load");
+					}
+					// 4. Trigger BeanUpdate flow
+					diffHelper.applyUpdate();
+
+					System.out.println("[Zk] BeanUpdateEvent triggered on remote node");
+				} else {
+					bean.load();
+				}
+
 			} catch (Exception e) {
-				LOG.log(Level.WARNING, "Reload failed for " + path, e);
+				LOG.log(Level.WARNING, "Failed to process update for " + path, e);
+				try {
+					bean.load();
+				} catch (Exception ex) {
+					LOG.log(Level.SEVERE, "Fallback failed", ex);
+				}
 			} finally {
 				synchronized (pendingReloads) {
 					pendingReloads.remove(bean);
 				}
 			}
 		});
+	}
+
+	private XStream createXStreamForFullBean() {
+		XStream xs = new XStream(new StaxDriver());
+		XStream.setupDefaultSecurity(xs);
+		xs.allowTypesByWildcard(new String[] {
+				"finalconfigclasses.cfg.**",
+				"finalconfigclasses.cfg.gen.**",
+				"java.lang.*",
+				"java.util.*"
+		});
+		return xs;
+	}
+	private void applySnapshotToBean(BankConfigImpl bean, ZkAttrSnapshot snap) {
+		try {
+			// You can expand this to update all attributes from the snapshot
+			// For now, let's reload the whole bean (safest)
+			bean.load();
+
+			System.out.println("Applied snapshot and reloaded BankConfigImpl");
+		} catch (Exception e) {
+			LOG.log(Level.WARNING, "Failed to apply snapshot to bean", e);
+		}
 	}
 
 	public void shutdown() {

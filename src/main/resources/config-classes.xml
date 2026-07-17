@@ -1,0 +1,61 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE config-classes [
+]>
+<config-classes xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+xmlns="http://finalconfigclasses.com/cfg/xsd" xsi:noNamespaceSchemaLocation="config-classes.xsd">
+	
+  <!--
+    Note: Here the types you can use:
+    
+		String
+		bool, bool?
+		char, char?
+		short, short?
+		int, int?
+		long, long?
+		float, float?
+		double, double?
+		
+		bool?   = java.lang.Boolean
+		char?   = java.lang.Character
+		short?  = java.lang.Short
+		int?    = java.lang.Integer
+		long?   = java.lang.Long
+		float?  = java.lang.Float
+		double? = java.lang.Double
+	 -->
+	 
+	<config-class name="CacheConfigImpl" package="finalconfigclasses.cfg.gen" key="cache-config">
+		<attribute name="cacheSize" type="int" key="cache-max-size"/>
+		<attribute name="cachePolicy" type="String" key="cache-policy-impl"/>
+		
+		<!-- 		
+		<attribute name="booleanAttr" type="bool" key="CACHE_BA"/>
+		<attribute name="shortAttr" type="short" key="CACHE_SA"/>
+		<attribute name="longAttr" type="long" key="CACHE_LA"/>
+		<attribute name="floatAttr" type="float" key="CACHE_FA"/>
+		<attribute name="doubleAttr" type="double" key="CACHE_DA"/>
+
+		<attribute name="cacheSizeArr" type="int" key="CACHE_MAX_SIZEA" isArray="true"/>
+		<attribute name="cachePolicyArr" type="String" key="CACHE_POLICY_IMPLA" isArray="true"/>
+		<attribute name="booleanAttrArr" type="bool" key="CACHE_BAA" isArray="true"/>
+		<attribute name="shortAttrArr" type="short" key="CACHE_SAA" isArray="true"/>
+		<attribute name="longAttrArr" type="long" key="CACHE_LAA" isArray="true"/>
+		<attribute name="floatAttrArr" type="float" key="CACHE_FAA" isArray="true"/>
+		<attribute name="doubleAttrArr" type="double" key="CACHE_DAA" isArray="true"/>
+		 -->
+	</config-class>
+
+	<config-class name="BankConfigImpl" package="finalconfigclasses.cfg.gen" key="bank-ear">
+		<attribute name="tmpFolder" type="String" key="tmp-folder"/>
+		<attribute name="descriptions" type="String" key="descriptions" isArray="true"/>
+		<property name="jasperReportTemplateCacheConfig"
+			type="CacheConfigImpl" />
+		<property name="cacheConfigs" type="CacheConfigImpl" isArray="true" />
+	</config-class>
+
+	<config-class name="MoreCacheConfigImpl" package="finalconfigclasses.cfg.gen" extends="CacheConfigImpl" key="cache-config">
+		<attribute name="cacheBackend" type="String" key="cache-backend-impl"/>
+	</config-class>
+	
+</config-classes>
