@@ -189,8 +189,8 @@ public final class ZkConfigManager {
 					liveBean.load();
 
 					// 3. Now compute diff between old state and new loaded state
-					ConfigDiffHelper diffHelper = liveBean._newDiffHelper();
-					diffHelper.computeDiff(originalState);   // Note: source = old, target = new (live)
+					ConfigDiffHelper diffHelper = originalState._newDiffHelper();
+					diffHelper.computeDiff(liveBean);   // Note: source = old, target = new (live)
 
 					if (diffHelper.getBeanDiff() != null && diffHelper.getBeanDiff().size() > 0) {
 						System.out.println("[Zk] UpdateSet size: " + diffHelper.getBeanDiff().size());

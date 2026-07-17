@@ -58,7 +58,7 @@ public class ConfigValuesController {
     public ResponseEntity<Void> save(@PathVariable("className") String className,
                                      @RequestBody Map<String, Object> values) {
         try {
-            ConfigBean bean = Registry.getInstance().getConfig(className);
+            ConfigBean bean = new BankConfigImpl();
             if (bean == null) {
                 return ResponseEntity.notFound().build();
             }
